@@ -9,6 +9,7 @@ import cv2
 import pose_utils.utils as utils
 import logging
 from src.pose_extractor import PoseViTExtractor
+import src.refinement as ref
 
 class ZS6D:
 
@@ -22,6 +23,8 @@ class ZS6D:
         self.subset_templates = subset_templates
         self.max_crop_size = max_crop_size
 
+        self.obj_poses = np.load("./templates/obj_poses.npy")
+
         try:
             with open(os.path.join(templates_gt_path),'r') as f:
                 self.templates_gt = json.load(f)
@@ -33,6 +36,8 @@ class ZS6D:
             raise
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"device={self.device}")
+        #self.device = 'cpu'
 
         self.extractor = PoseViTExtractor(model_type=self.model_type, stride=self.stride, device=self.device)
 
@@ -59,6 +64,7 @@ class ZS6D:
             if bbox is None:
                 bbox = img_utils.get_bounding_box_from_mask(mask)
 
+            # Get Preprocessed Image
             img_crop, y_offset, x_offset = img_utils.make_quadratic_crop(np.array(img), bbox)
             mask_crop, _, _ = img_utils.make_quadratic_crop(mask, bbox)
             img_crop = cv2.bitwise_and(img_crop, img_crop, mask=mask_crop)
@@ -69,11 +75,12 @@ class ZS6D:
                 desc = self.extractor.extract_descriptors(img_prep.to(self.device), layer=11, facet='key', bin=False, include_cls=True)
                 desc = desc.squeeze(0).squeeze(0).detach().cpu()
 
+            # Match to best fitting Template
             matched_templates = utils.find_template_cpu(desc, self.templates_desc[obj_id], num_results=1)
 
             if not matched_templates:
                 raise ValueError("No matched templates found for the object.")
-
+            # TODO: Groundtruths @ gts/template_gts only goes to 341 not 642 ???
             template = Image.open(self.templates_gt[obj_id][matched_templates[0][1]]['img_crop'])
 
             with torch.no_grad():
@@ -84,6 +91,7 @@ class ZS6D:
 
                 resize_factor = float(crop_size) / img_crop.size[0]
 
+                # Local correspondence matching (Comparison btw Key(p_i) & Key(q_j))
                 points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_fastkmeans(img_crop, template, num_pairs=20, load_size=crop_size)
 
                 if not points1 or not points2:
@@ -92,16 +100,74 @@ class ZS6D:
                 img_uv = np.load(f"{self.templates_gt[obj_id][matched_templates[0][1]]['img_crop'].split('.png')[0]}_uv.npy")
                 img_uv = img_uv.astype(np.uint8)
                 img_uv = cv2.resize(img_uv, (crop_size, crop_size))
-                
+
+                # Pose estimation from valid correspondences between Template-Patches and Image-Patches
                 R_est, t_est = utils.get_pose_from_correspondences(points1, points2, 
                                                                    y_offset, x_offset, 
                                                                    img_uv, cam_K, 
                                                                    self.norm_factors[str(obj_id)], 
                                                                    scale_factor=1.0, 
                                                                    resize_factor=resize_factor)
-                
-                return R_est, t_est
+
+                # Refinement Stage
+                R_ref, t_ref = self.refine_pose_closest_template(R_est, t_est, obj_id, img_crop, crop_size,
+                                                                 y_offset, x_offset, cam_K, resize_factor)
+
+
+                return R_ref, t_ref, R_est, t_est
         except Exception as e:
             self.logger.error(f"Error in get_pose: {e}")
             raise
 
+    def refine_pose_closest_template(self, R_est, t_est, obj_id, img_crop,
+                                     crop_size, y_offset, x_offset, cam_K,
+                                     resize_factor):
+        """ Refinement based on the R_est Matrix that finds the closest Template
+        to the guessed R matrix and recalculates LCM """
+        # Load all Object Poses
+        R_t = self.obj_poses
+        # Get Template ID for the Template with the most similar Rot Matrix
+        temp_idx = ref.compare_templates(R_est, t_est, R_t)
+
+        # Read in new Template
+        template_ref = Image.open(self.templates_gt[obj_id][temp_idx]['img_crop'])
+
+        # Recalculate LCM:
+        points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_fastkmeans(img_crop, template_ref, num_pairs=20, load_size=crop_size)
+        if not points1 or not points2:
+            raise ValueError("Insufficient correspondences found @Refinement.")
+
+        # Load Template as numpy array and resize it accordingly
+        img_uv = np.load(f"{self.templates_gt[obj_id][temp_idx]['img_crop'].split('.png')[0]}_uv.npy")
+        img_uv = img_uv.astype(np.uint8)
+        img_uv = cv2.resize(img_uv, (crop_size, crop_size))
+
+        # Redo the Pose estimation with the new Template
+        R_ref, t_ref = utils.get_pose_from_correspondences(points1, points2,
+                                                           y_offset, x_offset,
+                                                           img_uv, cam_K,
+                                                           self.norm_factors[
+                                                               str(obj_id)],
+                                                           scale_factor=1.0,
+                                                           resize_factor=resize_factor)
+        return R_ref, t_ref
+
+    """
+    def refine_pose_foundpose(self, R_est, t_est,
+                              crop_size, img_crop):
+
+        # Get feature map F_q by stacking the Descriptors
+        image_batch, image_pil, scale_factor = self.extractor.preprocess(img_crop, crop_size)
+        descriptors = self.extractor.extract_descriptors(image_batch.to(self.device), layer=9, facet='key', bin=True)
+
+        F_q = descriptors   # Check how to stack, R**(axaxd) with axa = #Patches
+
+        
+        # R,t are refined by Levenberg-Marquardt (iterative/non-linear)
+        # TODO: Find functionality of LM optimization
+
+        # Updated Error Metric by minimizing the Barron Cost function
+
+        return  # R_new, t_new
+        
+    """

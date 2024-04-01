@@ -60,6 +60,7 @@ if __name__=="__main__":
 
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Device={device}\n")
 
     extractor = PoseViTExtractor(model_type='dino_vits8', stride=4, device=device)
 

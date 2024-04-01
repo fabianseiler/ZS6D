@@ -16,7 +16,7 @@ dependencies:
     - timm==0.9.16
     - matplotlib==3.8.3
     - scikit-learn==1.4.1.post1
-    - opencv-python==4.9.0
+    - opencv-python==4.9.0.80
     - git+https://github.com/lucasb-eyer/pydensecrf.git@dd070546eda51e21ab772ee6f14807c7f5b1548b
     - transforms3d==0.4.1
     - pillow==9.4.0
