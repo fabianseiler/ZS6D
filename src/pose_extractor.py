@@ -135,7 +135,6 @@ class PoseViTExtractor(extractor.ViTExtractor):
 
         bbs_mask = nn_2[nn_1] == image_idxs
 
-        # TODO: Cant this be done before we check cosine similarity => reduce No. of comparisons
         # remove best buddies where at least one descriptor is marked bg by saliency mask.
         fg_mask2_new_coors = nn_2[fg_mask2]
         fg_mask2_mask_new_coors = torch.zeros(num_patches1[0] * num_patches1[1], dtype=torch.bool, device=self.device)
@@ -143,7 +142,7 @@ class PoseViTExtractor(extractor.ViTExtractor):
         bbs_mask = torch.bitwise_and(bbs_mask, fg_mask1)
         bbs_mask = torch.bitwise_and(bbs_mask, fg_mask2_mask_new_coors)
 
-        # TODO: How does this part work? => most meaningful pairs
+        # Extract most meaningful pairs
         # applying k-means to extract k high quality well distributed correspondence pairs
         # bb_descs1 = descriptors1[0, 0, bbs_mask, :].cpu().numpy()
         # bb_descs2 = descriptors2[0, 0, nn_1[bbs_mask], :].cpu().numpy()
@@ -159,7 +158,6 @@ class PoseViTExtractor(extractor.ViTExtractor):
         start_time_kmeans = time.time()
         #'euclidean'
         # cluster_ids_x, cluster_centers = kmeans(X = normalized, num_clusters=n_clusters, distance='cosine', device=self.device)
-        # TODO: How is k_means used in this example?
         cluster_ids_x, cluster_centers = kmeans(X=normalized,
                                                 num_clusters=n_clusters,
                                                 distance='cosine',
@@ -218,8 +216,6 @@ class PoseViTExtractor(extractor.ViTExtractor):
         return points1, points2, image1_pil, image2_pil
 
     # Function that preprocesses the Template before Interference
-    # Proxy function that only preprocesses one Template => Update to follow
-
     ############################################################################
     def preprocess_template(self, pil_img, load_size, layer, facet, bin, thresh):
         """
@@ -238,19 +234,20 @@ class PoseViTExtractor(extractor.ViTExtractor):
 
         return descriptors2, num_patches2, load_size2, fg_mask2, saliency_map2, image2_pil
 
-    def create_desc_of_templates(self, folder, save_path, load_size=80,
+    def create_desc_of_templates(self, folder, save_path_dir, load_size=80,
                                  layer=9, facet: str='key', bin: bool=True):
         """ Creates Descriptors for LCM @Layer 9 of all Object Templates in 'folder'"""
         for obj in os.listdir(folder):
             if obj.startswith("obj"):
                 template_path = os.path.join(folder, obj)
-                save_path = os.path.join(save_path, obj)
+                save_path = os.path.join(save_path_dir, obj)
                 if not os.path.exists(save_path):
                     os.mkdir(save_path)
                 self.create_desc(template_path=template_path,
                                  save_path=save_path,
                                  load_size=load_size, layer=layer,
                                  facet=facet, bin=bin)
+                print(f"Object {obj} finnished!")
 
     def create_desc(self, template_path, save_path, load_size=80,
                     layer=9, facet: str='key', bin: bool=True):
@@ -266,13 +263,13 @@ class PoseViTExtractor(extractor.ViTExtractor):
             image_batch, image_pil, scale_factor = self.preprocess(img, load_size)
             # Descriptor size should be 361x6528, works with load_size=80
             descriptors = self.extract_descriptors(image_batch.to(self.device), layer, facet, bin)
-            print(f"File: {filename} done!")
+            # print(f"File: {filename} done!")
             torch.save(descriptors, save_path+"/"+filename.split(".png")[0]+".pt")
 
-    def pre_rank_template_patches(self, folder, comp_points: int=2):
+    def pre_rank_template_patches(self, folder, save_dir, comp_points: int = 32):
         """ Calculates the Cosine Similarity Matrix for "comp_points" neighbors to each object
         """
-        #folder = os.path.join("templates/ycbv_test/obj_1")
+        # folder = os.path.join("templates/ycbv_test/obj_1")
 
         # Iterate over each image of the object
         for filename in os.listdir(folder):
@@ -284,7 +281,7 @@ class PoseViTExtractor(extractor.ViTExtractor):
 
             # Get Img Numbers of Neighbors
             neighbor_numbers = self.get_neighbors(num_curr, comp_points)
-            print(f"Neighbors({num_curr})={neighbor_numbers}")
+            # print(f"Neighbors({num_curr})={neighbor_numbers}")
             
             # Calculate chunk_cosine_sim with every neighbor over every patch
             # Results in a list with all the similarities to the neighbors
@@ -292,30 +289,39 @@ class PoseViTExtractor(extractor.ViTExtractor):
                 neighbor_name = "{:06d}.pt".format(j)
                 desc_neighbor = torch.load(folder + "/" + neighbor_name)
                 similarities.append(chunk_cosine_sim(desc_curr, desc_neighbor))
-                print(f"Similarities of {num_curr},{j} calculated!")
 
+            sim_stacked = torch.stack(similarities, dim=0)
+            if not os.path.exists(save_dir):
+                os.mkdir(save_dir)
+            torch.save(sim_stacked, f"{save_dir}/sim_{num_curr}.pt")
+
+            """
             # Evaluate the best Patches that lead to BB:
             for k, sim_array in enumerate(similarities):
-                image_idxs = torch.arange(361*361, device=self.device)
-                # nn_1 - indices of block2 closest to block1
-                sim_1, nn_1 = torch.max(sim_array, dim=-1)
-                # nn_2 - indices of block1 closest to block2
-                sim_2, nn_2 = torch.max(sim_array, dim=-2)
-                sim_1, nn_1 = sim_1[0, 0], nn_1[0, 0]
-                sim_2, nn_2 = sim_2[0, 0], nn_2[0, 0]
-
+                
                 # Plot the Cosine Similarity over two templates
-                image_array = sim_array.squeeze().detach().numpy()
+                image_array = sim_array.squeeze().detach().cpu().numpy()
                 plt.imshow(image_array, cmap='viridis', origin='lower',
                            vmin=0, vmax=1)
                 plt.colorbar()
                 plt.title(f"Cosine Similarity of Template {num_curr} to {neighbor_numbers[k]}")
                 plt.show()
 
-                # bbs_mask = nn_2[nn_1] == image_idxs
+                # Get BB Mask
+                image_idxs = torch.arange(361, device=self.device)
+                # nn_1 - indices of block2 closest to block1
+                sim_1, nn_1 = torch.max(sim_array, dim=-1)
+                # nn_2 - indices of block1 closest to block2
+                sim_2, nn_2 = torch.max(sim_array, dim=-2)
+                sim_1, nn_1 = sim_1[0, 0], nn_1[0, 0]
+                sim_2, nn_2 = sim_2[0, 0], nn_2[0, 0]
+                bbs_mask = nn_2[nn_1] == image_idxs
 
                 # TODO: Find a way to effectively evaluate what Patches are good
-        return
+                # 1) AVG over every Sim Tensor => Get most relevant Patches
+                # 2) AVG with weighting over ever Sim Tensor
+                #    e.g. Sum{Sim_k/dist_k}
+            """
 
     @staticmethod
     def get_neighbors(curr_num, comp_points):
@@ -356,7 +362,7 @@ class PoseViTExtractor(extractor.ViTExtractor):
         # ----------------------------------------------------------------------
 
         # TODO: Implement Time save here with pre-selected template descriptors
-        preselect_mask = [] # TODO: Define preselect_mask for each Template
+        preselect_mask = []     # TODO: Define preselect_mask for each Template
         template_id = pil_img2
 
         # calculate similarity between image1 and image2 descriptors
@@ -374,7 +380,6 @@ class PoseViTExtractor(extractor.ViTExtractor):
 
         bbs_mask = nn_2[nn_1] == image_idxs
 
-        # TODO: Cant this be done before we check cosine similarity => reduce No. of comparisons
         # remove best buddies where at least one descriptor is marked bg by saliency mask.
         fg_mask2_new_coors = nn_2[fg_mask2]
         fg_mask2_mask_new_coors = torch.zeros(num_patches1[0] * num_patches1[1],

@@ -1,10 +1,13 @@
 import numpy as np
+import numpy.linalg.linalg
 from robust_loss_pytorch import *
 from src.levenberg_marquardt import lm
 
 
 def refine_surf_emb(self):
-    # Requires rendering on run-time => TODO: Ask if that even makes sense?
+    # Render Current Pos Estimate
+    # Project to 2D Image
+    # Biliniar Interpolation
     return  # R_new, t_new
 
 def refine_pose_megapose(self):
@@ -17,13 +20,13 @@ def refine_pose_megapose(self):
 
 
 def refinement():
-
     return
 
 def score_refinement():
     return
 
 # ----------------------- Compare R Matrix function -------------------------- #
+
 
 def compare_templates(R_est, t_est, R_t):
     """
@@ -49,9 +52,10 @@ def rot_matrix_to_angle_axis(rotation_matrix):
     Transforms a Rot Matrix into the angle axis representation
     """
     trace = np.trace(rotation_matrix)
-    theta = np.arccos((trace - 1) / 2)  # TODO: There seems to be a problem with the value range here
+    theta = np.arccos(np.clip(((trace - 1) / 2), -1, 1))
     if np.isclose(theta, 0):
-        return np.array([0, 0, 1]), 0  # No rotation, return arbitrary axis and angle 0
+        # No rotation, return arbitrary axis and angle 0
+        return np.array([0, 0, 1]), 0
     else:
         v = 1 / (2 * np.sin(theta)) * np.array([rotation_matrix[2, 1] - rotation_matrix[1, 2],
                                                 rotation_matrix[0, 2] - rotation_matrix[2, 0],
@@ -79,4 +83,26 @@ def angle_difference(angle_axis1, angle_axis_array):
     opposite_direction_mask = np.isclose(np.abs(dot_products), 1.0)
     angle_differences[opposite_direction_mask] = np.pi
 
+    print(angle_differences)
+
     return angle_differences
+
+
+def compare_templates_cos(R_est, R_t):
+    R_est_f = R_est.reshape(-1)
+    R_t_f = R_t.reshape(R_t.shape[0], -1)
+    sim = np.dot(R_t_f, R_est_f)
+    return np.argsort(sim)[0]
+
+
+
+if __name__ == '__main__':
+
+    R_est = np.array([[-0.85133979, 0.52450129, -0.01090679],
+                      [0.10908387, 0.15664633, -0.98161226],
+                      [-0.51314839, -0.83687533, -0.19057388]])
+
+
+    data = np.load("../templates/obj_poses.npy")[:, :3, :3]
+    x = compare_templates_cos(R_est, data)
+    print("fin")

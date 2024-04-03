@@ -3,7 +3,7 @@
   "dataset_path": "/test/000048/rgb/",
   "scale_factor": 0.001,
   "bbox_type": "bbox_visib",
-  "template_subset": 2,
+  "template_subset": 1,
   "results_file": "results_ycbv_bop_sam_10templates.csv",
   "norm_factor_path":"./templates/ycbv_desc/models_xyz/norm_factor.json",
   "num_matched_templates":1,
