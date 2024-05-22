@@ -328,7 +328,7 @@ class PoseViTExtractor(extractor.ViTExtractor):
         """
         Gets the closest neighbors based on the Euclidean distance to curr_num
         """
-        pos = np.load("./templates/template_positions.npy")
+        pos = np.load("../patch_preselection/template_positions.npy")
         curr_pos = pos[curr_num]
 
         # Calculate the Euclidean distance
@@ -339,10 +339,12 @@ class PoseViTExtractor(extractor.ViTExtractor):
         return idx_sorted
 
     # LCM with preselected Patches to decrease comparisons from O(n2) => O(n)
-    def find_correspondences_preselect(self, pil_img1, pil_img2, num_pairs:
+    def find_correspondences_preselect(self, obj_id, template_id, num_comp,
+                                       pil_img1, pil_img2, num_pairs:
                                        int = 10, load_size: int = 224,
                                        layer: int = 9, facet: str = 'key',
-                                       bin: bool = True, thresh: float = 0.05) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]], Image.Image, Image.Image]:
+                                       bin: bool = True, thresh: float = 0.05,
+                                       selection: float = 1) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]], Image.Image, Image.Image]:
         """
         Calculates the LCM with preselected patches for the Templates
         """
@@ -362,23 +364,28 @@ class PoseViTExtractor(extractor.ViTExtractor):
         # ----------------------------------------------------------------------
 
         # TODO: Implement Time save here with pre-selected template descriptors
-        preselect_mask = []     # TODO: Define preselect_mask for each Template
-        template_id = pil_img2
+        # Load the Corresponding Prerankings for obj_id at the matched template_id and select the top "num_comp" patches
+        valid_patches = np.load(f"./patch_preselection/ycbv_ranked_patches/obj_{obj_id}_ranked_patches.npy")[:, template_id]
+        valid_patches = valid_patches[:num_comp]
 
-        # calculate similarity between image1 and image2 descriptors
-        descriptors2_reduced = descriptors2[preselect_mask[template_id]]
-        similarities = chunk_cosine_sim(descriptors1, descriptors2_reduced)
+        # Calculate Cosine Similarity between reduced patches of template and Inference Image
+        descriptors2_reduced = torch.stack([descriptors2[:, :, idx, :] for idx in valid_patches], dim=2)
+        similarities_reduced = chunk_cosine_sim(descriptors1, descriptors2_reduced)
         # ----------------------------------------------------------------------
 
+
+        similarities = torch.zeros(size=(1, 1, num_patches1[0]*num_patches1[1], num_patches2[0]*num_patches2[1]), device=self.device)
+        similarities[:, :, :, valid_patches] = similarities_reduced
+
         # Calculate Best Buddies
-        image_idxs = torch.arange(num_patches1[0] * num_patches1[1],
-                                  device=self.device)
+        image_idxs = torch.arange(num_patches1[0] * num_patches1[1], device=self.device)
         sim_1, nn_1 = torch.max(similarities, dim=-1)  # nn_1 - indices of block2 closest to block1
         sim_2, nn_2 = torch.max(similarities, dim=-2)  # nn_2 - indices of block1 closest to block2
         sim_1, nn_1 = sim_1[0, 0], nn_1[0, 0]
         sim_2, nn_2 = sim_2[0, 0], nn_2[0, 0]
-
         bbs_mask = nn_2[nn_1] == image_idxs
+
+
 
         # remove best buddies where at least one descriptor is marked bg by saliency mask.
         fg_mask2_new_coors = nn_2[fg_mask2]

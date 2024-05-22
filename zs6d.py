@@ -9,7 +9,8 @@ import cv2
 import pose_utils.utils as utils
 import logging
 from src.pose_extractor import PoseViTExtractor
-import src.refinement as ref
+import refinement.refinement as ref
+
 
 class ZS6D:
 
@@ -23,12 +24,12 @@ class ZS6D:
         self.subset_templates = subset_templates
         self.max_crop_size = max_crop_size
 
-        # Added by Fabian Seiler
-        self.obj_poses = np.load("./templates/obj_poses.npy")
-        self.template_imgs_path = "./templates/ycbv_desc/"
+        # Added by Fabian Seiler for refinement, TODO: Add parameter
+        self.obj_poses = np.load("refinement/obj_poses.npy")
+        self.refinement = ""
 
         try:
-            with open(os.path.join(templates_gt_path),'r') as f:
+            with open(os.path.join(templates_gt_path), 'r') as f:
                 self.templates_gt = json.load(f)
 
             with open(os.path.join(norm_factors_path), 'r') as f:
@@ -39,15 +40,11 @@ class ZS6D:
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         print(f"device={self.device}")
-        #self.device = 'cpu'
 
         self.extractor = PoseViTExtractor(model_type=self.model_type, stride=self.stride, device=self.device)
 
-        # TODO: Remove
-        """
         self.templates_desc = {}
         templates_gt_subset = {}
-        
         try:
             for obj_id, template_labels in tqdm(self.templates_gt.items()):
                 self.templates_desc[obj_id] = torch.cat([torch.from_numpy(np.load(template_label['img_desc'])).unsqueeze(0)
@@ -60,14 +57,12 @@ class ZS6D:
         except Exception as e:
             self.logger.error(f"Error processing template descriptors: {e}")
             raise
-        """
 
-        #self.templates_gt = templates_gt_subset
+        self.templates_gt = templates_gt_subset
 
         self.logger.info("Preparing templates and loading of extractor is done!")
 
-
-    def get_pose(self, img, obj_id, mask, cam_K, bbox=None):
+    def get_pose(self, img, obj_id, mask, cam_K, num_comp, bbox=None):
         try:
             if bbox is None:
                 bbox = img_utils.get_bounding_box_from_mask(mask)
@@ -83,18 +78,14 @@ class ZS6D:
                 desc = self.extractor.extract_descriptors(img_prep.to(self.device), layer=11, facet='key', bin=False, include_cls=True)
                 desc = desc.squeeze(0).squeeze(0).detach().cpu()
 
-            obj_templates = self.get_all_desc(obj_id)
-
             # Match to best fitting Template
-            #matched_templates = utils.find_template_cpu(desc, self.templates_desc[obj_id], num_results=1)
-            matched_templates = utils.find_template_cpu(desc, obj_templates, num_results=1)
+            matched_templates = utils.find_template_cpu(desc, self.templates_desc[obj_id], num_results=1)
+            print(f"Matches Template: {matched_templates[0][1]}")
 
             if not matched_templates:
                 raise ValueError("No matched templates found for the object.")
 
-            #template = Image.open(self.templates_gt[obj_id][matched_templates[0][1]]['img_crop'])
-            template = Image.open(self.template_imgs_path + "obj_" + str(obj_id)
-                                  + "/{:06d}.png".format(matched_templates[0][1]))  # TODO: Hotfix here
+            template = Image.open(self.templates_gt[obj_id][matched_templates[0][1]]['img_crop'])
 
             with torch.no_grad():
                 if img_crop.size[0] < self.max_crop_size:
@@ -105,14 +96,23 @@ class ZS6D:
                 resize_factor = float(crop_size) / img_crop.size[0]
 
                 # Local correspondence matching (Comparison btw Key(p_i) & Key(q_j))
-                points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_fastkmeans(img_crop, template, num_pairs=20, load_size=crop_size)
+                #points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_fastkmeans(img_crop, template, num_pairs=20, load_size=crop_size)
+
+                # TODO: Patch Preselection Implementation
+                template_id = matched_templates[0][1]
+
+                points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_preselect( obj_id,
+                                                                                                          template_id,
+                                                                                                          num_comp,
+                                                                                                          img_crop,
+                                                                                                          template,
+                                                                                                          num_pairs=20,
+                                                                                                          load_size=crop_size)
 
                 if not points1 or not points2:
                     raise ValueError("Insufficient correspondences found.")
 
-                #img_uv = np.load(f"{self.templates_gt[obj_id][matched_templates[0][1]]['img_crop'].split('.png')[0]}_uv.npy")
-                path_obj = self.template_imgs_path + "obj_" + str(obj_id) + "/{:06d}_uv.npy".format(matched_templates[0][1]) # TODO Hotfix here
-                img_uv = np.load(path_obj)
+                img_uv = np.load(f"{self.templates_gt[obj_id][matched_templates[0][1]]['img_crop'].split('.png')[0]}_uv.npy")
                 img_uv = img_uv.astype(np.uint8)
                 img_uv = cv2.resize(img_uv, (crop_size, crop_size))
 
@@ -125,11 +125,13 @@ class ZS6D:
                                                                    resize_factor=resize_factor)
 
                 # Refinement Stage
-                R_ref, t_ref = self.refine_pose_closest_template(R_est, t_est, obj_id, img_crop, crop_size,
-                                                                 y_offset, x_offset, cam_K, resize_factor)
+                if self.refinement == 'ctr':
+                    R_ref, t_ref = self.refine_pose_closest_template(R_est, t_est, obj_id, img_crop, crop_size,
+                                                                     y_offset, x_offset, cam_K, resize_factor)
+                else:
+                    R_ref, t_ref = False, False
 
-
-                return R_ref, t_ref, R_est, t_est
+                return R_est, t_est, R_ref, t_ref
         except Exception as e:
             self.logger.error(f"Error in get_pose: {e}")
             raise
@@ -140,15 +142,14 @@ class ZS6D:
         """ Refinement based on the R_est Matrix that finds the closest Template
         to the guessed R matrix and recalculates LCM """
         # Load all Object Poses
-        R_t = self.obj_poses
+        R_t = self.obj_poses[:, :3, :3]
         # Get Template ID for the Template with the most similar Rot Matrix
-        temp_idx = ref.compare_templates(R_est, t_est, R_t)
-        # temp_idx = ref.compare_templates_cos(R_est, R_t)
+        temp_idx = ref.compare_templates(R_est, R_t)
+        #temp_idx = ref.compare_templates_cos(R_est, R_t)
+        print(f"Refinement Template: {temp_idx}")
 
         # Read in new Template
-        #template_ref = Image.open(self.templates_gt[obj_id][temp_idx]['img_crop']) # TODO: Hotfix here
-        template_ref = Image.open(self.template_imgs_path + "obj_" + str(obj_id)
-                                  + "/{:06d}.png".format(temp_idx))
+        template_ref = Image.open(self.templates_gt[obj_id][temp_idx]['img_crop'])
 
         # Recalculate LCM:
         points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_fastkmeans(img_crop, template_ref, num_pairs=20, load_size=crop_size)
@@ -156,9 +157,7 @@ class ZS6D:
             raise ValueError("Insufficient correspondences found @Refinement.")
 
         # Load Template as numpy array and resize it accordingly
-        #img_uv = np.load(f"{self.templates_gt[obj_id][temp_idx]['img_crop'].split('.png')[0]}_uv.npy")
-        path_obj = self.template_imgs_path + "obj_" + str(obj_id) + "/{:06d}_uv.npy".format(temp_idx)   # TODO: Hotfix here
-        img_uv = np.load(path_obj)
+        img_uv = np.load(f"{self.templates_gt[obj_id][temp_idx]['img_crop'].split('.png')[0]}_uv.npy")
         img_uv = img_uv.astype(np.uint8)
         img_uv = cv2.resize(img_uv, (crop_size, crop_size))
 
@@ -172,12 +171,12 @@ class ZS6D:
                                                            resize_factor=resize_factor)
         return R_ref, t_ref
 
+    """
     def get_all_desc(self, obj_id):
-        for obj_idx, template_labels in tqdm(self.templates_gt.items()):
-            if obj_id == obj_idx:
-                return torch.cat([torch.from_numpy(np.load(template_label['img_desc'])).unsqueeze(0)
-                                  for i, template_label in enumerate(template_labels)], dim=0)
+        return torch.cat([torch.from_numpy(np.load(f"{self.template_imgs_path}obj_{obj_id}/" + "{:06d}.npy".format(i))).unsqueeze(0)
+                         for i in range(642)], dim=0)
 
+    """
 
     """
     def refine_pose_foundpose(self, R_est, t_est,
