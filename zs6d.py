@@ -26,7 +26,7 @@ class ZS6D:
 
         # Added by Fabian Seiler for refinement, TODO: Add parameter
         self.obj_poses = np.load("refinement/obj_poses.npy")
-        self.refinement = ""
+        self.refinement = "none"    #'ctr'
 
         try:
             with open(os.path.join(templates_gt_path), 'r') as f:
@@ -96,18 +96,19 @@ class ZS6D:
                 resize_factor = float(crop_size) / img_crop.size[0]
 
                 # Local correspondence matching (Comparison btw Key(p_i) & Key(q_j))
-                #points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_fastkmeans(img_crop, template, num_pairs=20, load_size=crop_size)
+                points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_fastkmeans(img_crop, template, num_pairs=20, load_size=crop_size)
+
 
                 # TODO: Patch Preselection Implementation
                 template_id = matched_templates[0][1]
 
-                points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_preselect( obj_id,
-                                                                                                          template_id,
-                                                                                                          num_comp,
-                                                                                                          img_crop,
-                                                                                                          template,
-                                                                                                          num_pairs=20,
-                                                                                                          load_size=crop_size)
+                #points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_preselect(obj_id,
+                #                                                                                         template_id,
+                #                                                                                         num_comp,
+                #                                                                                         img_crop,
+                #                                                                                         template,
+                #                                                                                         num_pairs=20,
+                #                                                                                         load_size=crop_size)
 
                 if not points1 or not points2:
                     raise ValueError("Insufficient correspondences found.")
@@ -124,14 +125,15 @@ class ZS6D:
                                                                    scale_factor=1.0, 
                                                                    resize_factor=resize_factor)
 
-                # Refinement Stage
+                # TODO: Revert Changes when BOP evaluation is fixed
+                # Refinement Stage: Closest Template Refinement of Not
                 if self.refinement == 'ctr':
                     R_ref, t_ref = self.refine_pose_closest_template(R_est, t_est, obj_id, img_crop, crop_size,
                                                                      y_offset, x_offset, cam_K, resize_factor)
                 else:
                     R_ref, t_ref = False, False
 
-                return R_est, t_est, R_ref, t_ref
+                return R_est, t_est
         except Exception as e:
             self.logger.error(f"Error in get_pose: {e}")
             raise

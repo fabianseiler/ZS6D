@@ -42,7 +42,6 @@ if __name__=="__main__":
     with open(os.path.join(config['norm_factor_path']), 'r') as f:
         norm_factors = json.load(f)
 
-
     #Set up a results csv file:
     csv_file = os.path.join('./results', config['results_file'])
 
@@ -61,6 +60,7 @@ if __name__=="__main__":
         
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+    # TODO: ZS6D here ?
     extractor = PoseViTExtractor(model_type='dino_vits8', stride=4, device=device)
     print("Loading PoseViTExtractor is done!")
 

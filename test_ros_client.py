@@ -36,7 +36,7 @@ if __name__ == "__main__":
         gts = json.load(fp)
 
     img_gt = gts["000048_1"]
-    rgb = cv2.imread("test/000048/rgb/000001.png")[..., ::-1]
+    rgb = cv2.imread("test/ycbv/000048/rgb/000001.png")[..., ::-1]
     cam_K = np.array(img_gt[0]['cam_K']).reshape((3,3))
 
     plt.imshow(rgb)

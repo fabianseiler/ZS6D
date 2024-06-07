@@ -353,6 +353,7 @@ class PoseViTExtractor(extractor.ViTExtractor):
 
         # ----------------------------------------------------------------------
         # Preprocess Example Image and create Descriptors
+        # TODO: Descriptor Size is 100x6528 @ Test Image 000057_61 => Check why the this happens
         image1_batch, image1_pil, scale_factor = self.preprocess(pil_img1, load_size)
         descriptors1 = self.extract_descriptors(image1_batch.to(self.device),
                                                 layer, facet, bin)
@@ -363,7 +364,6 @@ class PoseViTExtractor(extractor.ViTExtractor):
         fg_mask1 = saliency_map1 > thresh
         # ----------------------------------------------------------------------
 
-        # TODO: Implement Time save here with pre-selected template descriptors
         # Load the Corresponding Prerankings for obj_id at the matched template_id and select the top "num_comp" patches
         valid_patches = np.load(f"./patch_preselection/ycbv_ranked_patches/obj_{obj_id}_ranked_patches.npy")[:, template_id]
         valid_patches = valid_patches[:num_comp]
@@ -371,11 +371,11 @@ class PoseViTExtractor(extractor.ViTExtractor):
         # Calculate Cosine Similarity between reduced patches of template and Inference Image
         descriptors2_reduced = torch.stack([descriptors2[:, :, idx, :] for idx in valid_patches], dim=2)
         similarities_reduced = chunk_cosine_sim(descriptors1, descriptors2_reduced)
-        # ----------------------------------------------------------------------
 
-
+        # Load in the valid Similarities and set the others equal to 0
         similarities = torch.zeros(size=(1, 1, num_patches1[0]*num_patches1[1], num_patches2[0]*num_patches2[1]), device=self.device)
         similarities[:, :, :, valid_patches] = similarities_reduced
+        # ----------------------------------------------------------------------
 
         # Calculate Best Buddies
         image_idxs = torch.arange(num_patches1[0] * num_patches1[1], device=self.device)
@@ -384,8 +384,6 @@ class PoseViTExtractor(extractor.ViTExtractor):
         sim_1, nn_1 = sim_1[0, 0], nn_1[0, 0]
         sim_2, nn_2 = sim_2[0, 0], nn_2[0, 0]
         bbs_mask = nn_2[nn_1] == image_idxs
-
-
 
         # remove best buddies where at least one descriptor is marked bg by saliency mask.
         fg_mask2_new_coors = nn_2[fg_mask2]

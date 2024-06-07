@@ -48,6 +48,6 @@ def haversine_distance_to_neighbors(curr_num, comp_points):
 
 if __name__ == '__main__':
 
-    data = np.genfromtxt('./results/results_ycbv_bop_sam_10templates.csv', delimiter=',')
+    data = np.genfromtxt('results/zs6d_ycbv-test_exact.csv', delimiter=',')
 
     print(data)
