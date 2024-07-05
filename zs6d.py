@@ -80,7 +80,7 @@ class ZS6D:
 
             # Match to best fitting Template
             matched_templates = utils.find_template_cpu(desc, self.templates_desc[obj_id], num_results=1)
-            print(f"Matches Template: {matched_templates[0][1]}")
+            #print(f"Matches Template: {matched_templates[0][1]}")
 
             if not matched_templates:
                 raise ValueError("No matched templates found for the object.")
@@ -98,9 +98,7 @@ class ZS6D:
                 # Local correspondence matching (Comparison btw Key(p_i) & Key(q_j))
                 points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_fastkmeans(img_crop, template, num_pairs=20, load_size=crop_size)
 
-
-                # TODO: Patch Preselection Implementation
-                template_id = matched_templates[0][1]
+                #template_id = matched_templates[0][1]
 
                 #points1, points2, crop_pil, template_pil = self.extractor.find_correspondences_preselect(obj_id,
                 #                                                                                         template_id,

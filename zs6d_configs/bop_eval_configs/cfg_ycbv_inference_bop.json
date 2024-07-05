@@ -4,9 +4,9 @@
   "scale_factor": 0.001,
   "bbox_type": "bbox_visib",
   "template_subset": 1,
-  "results_file": "zs6d_ycbv-test_exact.csv",
+  "results_file": "zs6d_ycbv-test_pp180.csv",
   "norm_factor_path":"./templates/ycbv_desc/models_xyz/norm_factor.json",
   "num_matched_templates":1,
   "image_resolution":[480, 640],
-  "debug_imgs": 1 
+  "debug_imgs": 0
 }

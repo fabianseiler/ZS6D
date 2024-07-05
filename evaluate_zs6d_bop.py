@@ -60,7 +60,6 @@ if __name__=="__main__":
         
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    # TODO: ZS6D here ?
     extractor = PoseViTExtractor(model_type='dino_vits8', stride=4, device=device)
     print("Loading PoseViTExtractor is done!")
 
@@ -80,7 +79,9 @@ if __name__=="__main__":
             
     print("Preparing templates finished!")
     
-    
+    # TODO: Error at image 364: Last image == (000054,001568,15) = (set, image, object)
+    #  000054,001568,15,0.0,-0.7545364655918037 -0.5936539351974932 0.2797315272127181 -0.19003206543623263 -0.21034301915266673 -0.9589805151304069 0.6281421305709947 -0.7767437283417689 0.0458981947734356,346.8847504849647 -105.97637262330714 2336.534640536453,0.4961113929748535
+
     print("Processing input images:")
     for all_id, img_labels in tqdm(data_gt.items()):
         scene_id = all_id.split("_")[0]
@@ -180,6 +181,18 @@ if __name__=="__main__":
                                                                                                                  template, 
                                                                                                                  num_pairs=20,
                                                                                                                  load_size=img_data.crops[i].size[0])
+
+                            #template_id = matched_templates[0][1]
+                            #num_comp = 300
+
+                            #points1, points2, crop_pil, template_pil = extractor.find_correspondences_preselect(obj_id,
+                            #                                                                                    template_id,
+                            #                                                                                    num_comp,
+                            #                                                                                    img_crop,
+                            #                                                                                    template,
+                            #                                                                                    num_pairs=20,
+                            #                                                                                    load_size=crop_size)
+
                     except Exception as e:
                         logging.error(f"Local correspondence matching failed for {img_data.img_name} and object_id {img_data.obj_ids[i]}: {e}")
                             
@@ -249,7 +262,6 @@ if __name__=="__main__":
             with open(csv_file, mode='a', newline='') as csvfile:
                 csv_writer = csv.writer(csvfile)
                 csv_writer.writerow([img_data.scene_id, img_data.img_name, object_id, score, R_best_str, t_best_str, elapsed_time])
-
 
             if config['debug_imgs']:
                 if i % config['debug_imgs'] == 0: 

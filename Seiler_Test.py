@@ -1,3 +1,5 @@
+import csv
+
 import numpy as np
 import torch
 import cv2
@@ -47,7 +49,3 @@ def haversine_distance_to_neighbors(curr_num, comp_points):
 
 
 if __name__ == '__main__':
-
-    data = np.genfromtxt('results/zs6d_ycbv-test_exact.csv', delimiter=',')
-
-    print(data)
